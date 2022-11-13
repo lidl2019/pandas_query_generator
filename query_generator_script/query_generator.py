@@ -5,6 +5,9 @@ from typing import Type, List, Union, Dict
 from enum import Enum
 
 import itertools
+from configs import *
+import helpers as h
+from tqdm import tqdm
 
 
 class pandas_source:
@@ -133,37 +136,57 @@ class selection(operation):
         return eval(self.to_str())
 
 class merge(operation):
-    def __init__(self, df_name, queries: 'pandas_query', on, leading=False):
+    def __init__(self, df_name, queries: 'pandas_query', on=None, left_on: str = None, right_on: str = None, leading=False):
         super().__init__(df_name, leading)
+
+        # assert (left_on == None and right_on == None) or on == None
+        if on is None:
+            on = []
+        if left_on is None:
+            left_on = ""
+        if right_on is None:
+            right_on = ""
         self.operations = queries.operations
         self.queries = queries
         self.on_col = on
+        self.left_on = left_on
+        self.right_on = right_on
+
 
     def to_str(self) -> str:
         # print(f"+++++++++++++++++++++{self.on_col}")
-        res_str = f"{self.df_name}" if self.leading else""
 
-        operations_to_str = self.queries.get_query_str(self.queries.pre_gen_query)
-        # for op in self.operations:
-        #     operations_to_str += op.to_str()
+        if len(self.on_col) > 0:
+            res_str = f"{self.df_name}" if self.leading else""
 
-        on_cols = ""
-        for col in self.on_col:
-            on_cols = on_cols + "'" + col + "'" + ","
+            operations_to_str = self.queries.get_query_str(self.queries.pre_gen_query)
+            # for op in self.operations:
+            #     operations_to_str += op.to_str()
 
-        on_cols = on_cols[:-1]
+            on_cols = ""
+            for col in self.on_col:
+                on_cols = on_cols + "'" + col + "'" + ","
 
-        res_str = res_str + "." + "merge" + "(" +operations_to_str +"," + "on=" + "[" + on_cols  + "]"+")"
-        return res_str
+            on_cols = on_cols[:-1]
 
-    def new_merge(self, new_queries, new_on_col):
-        return merge(self.df_name, new_queries, new_on_col, leading=self.leading)
+            res_str = res_str + "." + "merge" + "(" +operations_to_str +"," + "on=" + "[" + on_cols  + "]"+")"
+            return res_str
+        else:
+
+            res_str = f"{self.df_name}" if self.leading else ""
+            operations_to_str = self.queries.get_query_str(self.queries.pre_gen_query)
+            res_str = res_str + "." + "merge" + "(" +operations_to_str + "," +"left_on=" + "'" + self.left_on + "'" + ", "\
+                       + "right_on=" + "'"  + self.right_on + "'"+ ")"
+            return res_str
+
+    def new_merge(self, new_queries, new_on_col = None, new_left_on = None, new_right_on = None):
+        return merge(self.df_name, new_queries, new_on_col, new_left_on, new_right_on, leading=self.leading)
 
     def exec(self):
         return eval(self.to_str())
 
     def __str__(self):
-        return f"merge: df_name = {self.df_name}, on_col = {self.on_col}"
+        return f"merge: df_name = {self.df_name}, on_col = {self.on_col}, left_on = {self.left_on}, right_on = {self.right_on}"
 
 class projection(operation):
     def __init__(self, df_name, columns, leading=True):
@@ -247,13 +270,13 @@ class agg(operation):
 
 
 class pandas_query():
-    def __init__(self, q_gen_query: List[operation], source: pd.DataFrame = None, verbose = False):
+    def __init__(self, q_gen_query: List[operation], source: 'TBL_source' = None, verbose = False):
 
         self.setup_query(q_gen_query)
         if verbose:
             print(self.get_query_str(q_gen_query))
-        self._source_ = source # df
-
+        # self._source_ = source # df
+        self._source_ = source
         self._source_pandas_q = ""
         self.pre_gen_query = q_gen_query
         self.df_name = q_gen_query[0].df_name
@@ -269,12 +292,14 @@ class pandas_query():
 
         self.target = self.execute_query(self.pre_gen_query) # df after operation
 
+    def get_TBL_source(self):
+        return self._source_
 
     def get_target(self):
         return self.target
 
     def get_source(self):
-        return self._source_.copy()
+        return self._source_.source.copy()
 
     def setup_query(self, list_operation: List[operation]):
         for i, op in enumerate(list_operation):
@@ -296,7 +321,9 @@ class pandas_query():
                 possible_new_conditions = []
                 for i, cond in enumerate(operation.conditions):
                     if isinstance(cond, OP_cond):
-                        possible_new_conditions.append(cond)
+                        cur = random.choice([OP_cond.OR, OP_cond.AND])
+
+                        possible_new_conditions.append(cur)
                         continue
                     possible_new_ith_cond = []
 
@@ -311,6 +338,11 @@ class pandas_query():
 
                             new_val = des[s]
                             for operator in OP:
+                                if type(cond.val) == int:
+                                    # print(des["min"])
+                                    new_val = round(new_val) + random.randrange(0, abs(round(des["std"]+1)), 1)
+                                else:
+                                    new_val = round(new_val + (des["std"] + 1) * random.random(), 2)
                                 new_condition = condition(cond.col, operator, new_val)
                                 possible_new_ith_cond.append(new_condition)
 
@@ -375,8 +407,10 @@ class pandas_query():
         random.shuffle(new_queries)
         new_queries = new_queries[:1000]
         print(f" ==== testing source with {len(new_queries)} queries ==== ")
-        df = self._source_
+        df = self.get_source()
+        tbl = self.get_TBL_source()
         c = 0
+        g = 0
         for i, new_query in enumerate(new_queries):
             if i % (len(new_queries) // 10) == 0:
                 print(f"=== {c}% ===")
@@ -386,11 +420,13 @@ class pandas_query():
                 result_df = self.execute_query(new_query)
             except Exception:
                 continue
-
-            new_q_obj = pandas_query(new_query, df)
+            g += 1
+            new_q_obj = pandas_query(new_query, tbl)
             new_q_obj.target = result_df
             res.append(new_q_obj)
         random.shuffle(res)
+
+        print(f" ======= {g} new queries generated =======")
         return res
 
     def execute_query(self, query):
@@ -400,7 +436,7 @@ class pandas_query():
     def generate_possible_groupby_combinations(self, operation: group_by, generate_num=50):
 
         print("===== generating groupby combinations =====")
-        columns = self._source_.columns
+        columns = self.get_source().columns
         possible_groupby_columns = []
         for col in columns:
             possible_groupby_columns.append(col)
@@ -423,8 +459,8 @@ class pandas_query():
         # else:
 
 
-    def generate_possible_column_combinations(self, operation: projection, generate_num=50):
-        columns = self._source_.columns
+    def generate_possible_column_combinations(self, operation: projection, generate_num=200):
+        columns = self.get_source().columns
         possible_columns = []
 
         print("===== generating column combinations =====")
@@ -433,7 +469,12 @@ class pandas_query():
             return [columns]
 
         else:
+
             res = [list(i) for i in list(itertools.combinations(columns, operation.length))]
+            if operation.length > 1 and operation.length < len(list(columns)):
+                res = res + [list(i) for i in list(itertools.combinations(columns, operation.length - 1))]
+                res = res + [list(i) for i in list(itertools.combinations(columns, operation.length + 1))]
+
             random.shuffle(res)
             return res[:generate_num]
 
@@ -452,7 +493,8 @@ class pandas_query():
             for i, new_cond in enumerate(possible_new_conditions):
 
                 if isinstance(new_cond, OP_cond):
-                    possible_cond.append(new_cond)
+                    cur = random.choice([OP_cond.OR, OP_cond.AND])
+                    possible_cond.append(cur)
                     continue
                 if clocks[i] < len(new_cond):
                     possible_new_ith_condition = new_cond[clocks[i]]
@@ -469,7 +511,7 @@ class pandas_query():
 
     def get_possible_values(self, col):
 
-        des = self.get_source_description(self._source_, col)
+        des = self.get_source_description(self.get_source(), col)
         return des
 
     def get_query_str(self, query):
@@ -497,43 +539,113 @@ class pandas_query():
     # def parse_query_from_str(self, source_query):
 
 class pandas_queries():
-    def __init__(self, queries: List[pandas_query]):
+    def __init__(self, queries: List[pandas_query], self_join = False, verbose = False):
         self.queries = queries
+        self.self_join = self_join
+        self.result_queries = []
+        self.verbose = verbose
 
-    def check_merge(self, q1:pandas_query, q2:pandas_query):
+        self.un_merged_queries = queries[:]
+
+
+
+    def save_unmerged_examples(self, dir, filename):
+        count = 0
+        f = open(f"{dir}/{filename}.txt", "a")
+        for q in self.un_merged_queries:
+            # strs = q.
+            strs = q.get_query_str(q.pre_gen_query)
+            f.write(f"df{count} = {strs} \n")
+            count += 1
+        print(f" ##### Successfully write the unmerged queries into file {dir}/{filename}.txt #####")
+        f.close()
+    def shuffle_queries(self):
+        random.shuffle(self.queries)
+
+
+    def check_merge_on(self, q1:pandas_query, q2:pandas_query):
         cols = q1.get_target().columns.intersection(q2.get_target().columns)
         if len(cols) == 0 or len(cols) == min(len(q1.get_source().columns), len(q2.get_source().columns)):
             return None
 
         return list(cols)
 
+    def check_merge_left_right(self, q1:pandas_query, q2:pandas_query):
+        col1 = list(q1.get_target().columns)
+        col2 = list(q2.get_target().columns)
 
+        # print(col1)
+        # print(col2)
+
+
+
+        q1_foreign_keys = q1.get_TBL_source().get_foreign_keys()
+        q2_foreign_keys = q2.get_TBL_source().get_foreign_keys()
+
+        foreign_list = {}
+        for key in q1_foreign_keys:
+            if key in col1:
+                for a in q1_foreign_keys[key]:
+                    foreign_list[a[0]] = key
+
+        for col in col2:
+            if col in foreign_list:
+                return [foreign_list[col], col]
+
+
+
+
+        # print(foreign_list)
+
+        '''
+        for col in col1:
+
+            if col in q1_foreign_keys:
+
+                for key_and_ref in q1_foreign_keys[col]:
+
+                    if key_and_ref[0] == col:
+                        
+                        return [col, key_and_ref[0]]
+        '''
+        return []
 
     def generate_possible_merge_operations(self, max_merge = 3):
         cur_queries = self.queries[:]
         k = 0
         res_hash = {}
+        q_generated = 0
         while True:
             if k >= max_merge:
                 break
-            for i in range(len(cur_queries)-1):
+            for i in tqdm(range(len(cur_queries)-1)):
                 for j in range(i+1, len(cur_queries)):
                     if str(i)+"+"+str(j) not in res_hash:
+
+
+
                         q1 = cur_queries[i]
                         q2 = cur_queries[j]
 
-                        if q1.get_source().equals(q2.get_source()):
-                            print("#### queries with same source detected, skipping to the next queries ####")
+
+                        # print(f"q1 df name = {q1}")
+                        # print(f"q2 df_name = {q2}")
+
+
+                        if q1.get_source().equals(q2.get_source()) and (self.self_join == False):
+                            # print("#### queries with same source detected, skipping to the next queries ####")
                             continue
 
-                        cols = self.check_merge(q1, q2)
+                        merge_differenet_keys = self.check_merge_left_right(q1, q2)
 
-                        if cols and max(q1.num_merges, q2.num_merges) < 3:
-                            # print(cols)
+
+
+                        if len(merge_differenet_keys) > 0:
+                            if self.verbose:
+                                print(f"keys to merge = {merge_differenet_keys}")
                             operations = list(q1.pre_gen_query)[:]
 
-                            operations.append(merge(df_name=q1.df_name, queries=q2, on=cols))
-
+                            operations.append(merge(df_name=q1.df_name, queries=q2, left_on=merge_differenet_keys[0], right_on=merge_differenet_keys[1]))
                             strs = ""
 
                             for op in operations:
@@ -541,33 +653,118 @@ class pandas_queries():
                                 strs += op.to_str()
 
                                 # print("cur op to str = " + op.to_str())
-
-                            print(f"strs here = {strs}")
+                            if self.verbose:
+                                print(f"strs here = {strs}")
                             t = eval(strs)
                             if t.shape[0] == 0:
-                                print("no rows exist with the above selection")
+                                if self.verbose:
+                                    print("no rows exist with the above selection")
                                 continue
                             else:
-                                print("successfully generated query")
+                                if self.verbose:
+                                    print("successfully generated query")
                             try:
-                                res_df = q1.get_target().merge(q2.get_target(), on=cols)
+                                res_df = q1.get_target().merge(q2.get_target(), left_on=merge_differenet_keys[0], right_on=merge_differenet_keys[1])
 
                             except Exception:
+                                if self.verbose:
+                                    print("Exception occurred")
                                 continue
-
-                            new_query = pandas_query(operations, q1.get_source(), verbose=True)
+                            if self.verbose:
+                                print("++++++++++ add the result query to template +++++++++++++")
+                            new_query = pandas_query(operations, q1.get_TBL_source(), verbose=False)
                             new_query.target = res_df
                             new_query.num_merges = max(q1.num_merges, q2.num_merges) + 1
 
                             cur_queries.append(new_query)
+
+                            q_generated += 1
+
+                            if q_generated % 1000 == 0:
+                                print(f"**** {q_generated} queries have generated ****")
+
+                            self.result_queries.append(new_query)
                             res_hash[f"{str(i)}+{str(j)}"] = 0
+
+
+                        else:
+                        ###################################################
+                            cols = self.check_merge_on(q1, q2)
+
+                            if cols and max(q1.num_merges, q2.num_merges) < 3 and self.self_join:
+                                # print(cols)
+                                operations = list(q1.pre_gen_query)[:]
+
+                                operations.append(merge(df_name=q1.df_name, queries=q2, on=cols))
+
+                                strs = ""
+
+                                for op in operations:
+                                    # print("cur op = " + str(op))
+                                    strs += op.to_str()
+
+                                    # print("cur op to str = " + op.to_str())
+                                if self.verbose:
+                                    print(f"strs here = {strs}")
+                                t = eval(strs)
+                                if t.shape[0] == 0:
+                                    if self.verbose:
+                                        print("no rows exist with the above selection")
+                                    continue
+                                else:
+                                    if self.verbose:
+                                        print("successfully generated query")
+                                try:
+                                    res_df = q1.get_target().merge(q2.get_target(), on=cols)
+
+                                except Exception:
+                                    if self.verbose:
+                                        print("Exception occurred")
+                                    continue
+                                if self.verbose:
+                                    print("++++++++++ add the result query to template +++++++++++++")
+
+                                new_query = pandas_query(operations, q1.get_TBL_source(), verbose=False)
+                                new_query.target = res_df
+                                new_query.num_merges = max(q1.num_merges, q2.num_merges) + 1
+
+                                cur_queries.append(new_query)
+                                self.result_queries.append(new_query)
+                                res_hash[f"{str(i)}+{str(j)}"] = 0
+
+                                q_generated += 1
+
+                                if q_generated % 1000 == 0:
+                                    print(f"**** {q_generated} queries have generated ****")
 
 
 
 
             k += 1
 
+            break
+
         return cur_queries
+
+
+class TBL_source():
+    # self.source_df
+
+    def __init__(self, df:pd.DataFrame):
+        self.source = df
+        self.foreign_keys = {}
+
+
+    def add_edge(self, col_name, other_col_name, other:'TBL_source'):
+        self.foreign_keys[col_name] = []
+        self.foreign_keys[col_name].append([other_col_name, other])
+
+    def get_foreign_keys(self):
+        return self.foreign_keys.copy()
+
+    def equals(self, o:'TBL_source'):
+        return self.source.equals(o.source)
+
 
 
 
@@ -678,27 +875,20 @@ def generate_tpch():
         res += pq.get_new_pandas_queries()[:100]
 
 
-class TBL_source():
-    # self.source_df
-
-    def __init__(self, name):
-        pass
-
-    def add_edge(self):
-        pass
 
 
 
-if __name__ == "__main__":
 
-    customer = pd.read_csv("./../benchmarks/customer.csv")
-    lineitem = pd.read_csv("./../benchmarks/lineitem.csv")
-    nation = pd.read_csv("./../benchmarks/nation.csv")
-    orders = pd.read_csv("./../benchmarks/orders.csv")
-    part = pd.read_csv("./../benchmarks/part.csv")
-    partsupp = pd.read_csv("./../benchmarks/partsupp.csv")
-    region = pd.read_csv("./../benchmarks/region.csv")
-    supplier = pd.read_csv("./../benchmarks/supplier.csv")
+def run_TPCH():
+
+    customer = TBL_source(pd.read_csv("./../../../benchmarks/customer.csv"))
+    lineitem = TBL_source(pd.read_csv("./../../../benchmarks/lineitem.csv"))
+    nation = TBL_source(pd.read_csv("./../../../benchmarks/nation.csv"))
+    orders = TBL_source(pd.read_csv("./../../../benchmarks/orders.csv"))
+    part = TBL_source(pd.read_csv("./../../../benchmarks/part.csv"))
+    partsupp =TBL_source(pd.read_csv("./../../../benchmarks/partsupp.csv"))
+    region = TBL_source(pd.read_csv("./../../../benchmarks/region.csv"))
+    supplier = TBL_source(pd.read_csv("./../../../benchmarks/supplier.csv"))
     q1 = [selection("customer",
                     conditions=[condition("ACCTBAL", OP.gt, 100), OP_cond.OR, condition("CUSTKEY", OP.le, 70)]),
           projection("customer", ["CUSTKEY", "NATIONKEY", "PHONE", "ACCTBAL", "MKTSEGMENT"])
@@ -833,14 +1023,139 @@ if __name__ == "__main__":
     #     print(cur)
 
 
-# class query_generator():
-#     def __init__(self, query_template):
-#         self.query_template = query_template
-#         self.sampling_outputs = {}
-#     def _generate_new_pandas(self, pred_vals):
-#         for key, val in pred_vals.items():
-#             if key not in :
-#                 print("key not in pandas!")
-#             else:
-#                 self.query_template[key] = val
-#     customer = pd.read_table("./../benchmarks/customer.tbl", comment='#', delim_whitespace=True)
+
+if __name__ == "__main__":
+    # run_TPCH()
+    customer = pd.read_csv("./../../../benchmarks/customer_1.csv")
+    lineitem = pd.read_csv("./../../../benchmarks/lineitem_1.csv")
+    nation = pd.read_csv("./../../../benchmarks/nation_1.csv")
+    orders = pd.read_csv("./../../../benchmarks/orders_1.csv")
+    part = pd.read_csv("./../../../benchmarks/part_1.csv")
+    partsupp = pd.read_csv("./../../../benchmarks/partsupp_1.csv")
+    region = pd.read_csv("./../../../benchmarks/region_1.csv")
+    supplier = pd.read_csv("./../../../benchmarks/supplier_1.csv")
+    c = TBL_source(customer)
+    l = TBL_source(lineitem)
+    n = TBL_source(nation)
+    o = TBL_source(orders)
+    p = TBL_source(part)
+    ps = TBL_source(partsupp)
+    r = TBL_source(region)
+    s = TBL_source(supplier)
+
+
+    q1 = [selection("customer",
+                    conditions=[condition("C_ACCTBAL", OP.gt, 100), OP_cond.OR, condition("C_CUSTKEY", OP.le, 70)]),
+          projection("customer", ["C_CUSTKEY", "C_NATIONKEY", "C_PHONE", "C_ACCTBAL", "C_MKTSEGMENT"])
+          ]
+    q2 = [selection("customer",
+                    conditions=[condition("C_ACCTBAL", OP.gt, 100), OP_cond.OR, condition("C_CUSTKEY", OP.le, 70)]),
+          projection("customer", ["C_CUSTKEY", "C_NATIONKEY", "C_PHONE", "C_ACCTBAL", "C_MKTSEGMENT"]),
+          group_by("customer", "C_NATIONKEY"),
+          agg("customer", "max")
+          ]
+
+    q3 = [selection("lineitem",
+                    conditions=[condition("L_SUPPKEY", OP.gt, 100), OP_cond.OR, condition("L_QUANTITY", OP.gt, 5)]),
+          ]
+    q4 = [
+        selection("lineitem", conditions=[condition("L_SUPPKEY", OP.gt, 100), OP_cond.OR, condition("L_QUANTITY", OP.gt, 5),
+                                          OP_cond.AND,
+                                          condition("L_DISCOUNT", OP.gt, 0.05)]),
+        projection(
+            "lineitem", ["L_PARTKEY", "L_SUPPKEY", "L_LINENUMBER", "L_QUANTITY", "L_DISCOUNT", "L_TAX", "L_SHIPDATE"]
+        )
+
+    ]
+
+    ### generate links to the foreign keys
+
+    ### generate
+
+    q5 = [
+        selection("lineitem", conditions=[condition("L_SUPPKEY", OP.gt, 100), OP_cond.OR, condition("L_QUANTITY", OP.gt, 5),
+                                          OP_cond.AND,
+                                          condition("L_DISCOUNT", OP.gt, 0.05)]),
+        projection(
+            "lineitem",
+            ["L_PARTKEY", "L_SUPPKEY", "L_LINENUMBER", "L_QUANTITY", "L_RETURNFLAG", "L_DISCOUNT", "L_TAX", "L_SHIPDATE", "L_SHIPMODE"]
+        ), group_by("lineitem", "L_RETURNFLAG"), agg("lineitem", "min")
+
+    ]
+    q6 = [selection("nation", conditions=[condition("N_REGIONKEY", OP.gt, 0)]
+                    ), projection("nation", ["N_REGIONKEY", "N_NAME", "N_COMMENT"])]
+
+    q7 = [selection("region", conditions=[condition("R_REGIONKEY", OP.ge, 0)])]
+
+    q8 = [selection("orders", conditions=[condition("O_TOTALPRICE", OP.gt, 50000.0), OP_cond.OR,
+                                          condition("O_SHIPPRIORITY", OP.eq, 0)]),
+          projection(
+              "orders", ["O_CUSTKEY", "O_TOTALPRICE", "O_ORDERPRIORITY", "O_CLERK"]
+          )
+
+          ]
+
+    q9 = [selection("orders", conditions=[condition("O_TOTALPRICE", OP.gt, 50000.0), OP_cond.OR,
+                                          condition("O_SHIPPRIORITY", OP.eq, 0)]),
+          projection(
+              "orders", ["O_ORDERSTATUS", "O_CUSTKEY", "O_TOTALPRICE", "O_ORDERPRIORITY", "O_CLERK"]
+          ), group_by("orders", "O_ORDERSTATUS"), agg("orders", "max")
+
+          ]
+    q10 = [selection("supplier",
+                     conditions=[condition("S_NATIONKEY", OP.gt, 10), OP_cond.OR, condition("S_ACCTBAL", OP.le, 5000)]),
+           projection("supplier", ["S_NAME", "S_NATIONKEY", "S_ACCTBAL"])
+           ]
+    q11 = [selection("supplier",
+                     conditions=[condition("S_NATIONKEY", OP.gt, 10), OP_cond.OR, condition("S_ACCTBAL", OP.le, 5000)]),
+           ]
+    q12 = [selection("part", conditions=[condition("P_RETAILPRICE", OP.gt, 500)]
+                     )]
+
+    q13 = [selection("partsupp", conditions=[condition("PS_SUPPLYCOST", OP.le, 1000)])]
+
+    pq1 = pandas_query(q1, source=c)
+    pq2 = pandas_query(q2, source=c)
+    pq3 = pandas_query(q3, source=l)
+    pq4 = pandas_query(q4, source=l)
+    pq5 = pandas_query(q5, source=l)
+    pq6 = pandas_query(q6, source=n)
+    pq7 = pandas_query(q7, source=r)
+    pq8 = pandas_query(q8, source=o)
+    pq9 = pandas_query(q9, source=o)
+    pq10 = pandas_query(q10, source=s)
+    pq11 = pandas_query(q11, source=s)
+    pq12 = pandas_query(q12, source=p)
+    pq13 = pandas_query(q13, source=ps)
+
+    h.add_foreignkeys(c, "C_NATIONKEY", s, "S_NATIONKEY")
+    h.add_foreignkeys(c, "C_NATIONKEY", n, "N_NATIONKEY")
+    h.add_foreignkeys(c, "C_CUSTKEY", o, "O_CUSTKEY")
+    h.add_foreignkeys(o, "O_ORDERKEY", l, "L_ORDERKEY")
+    h.add_foreignkeys(l, "L_PARTKEY", ps, "PS_PARTKEY")
+    h.add_foreignkeys(l, "L_PARTKEY", ps, "PS_SUPPKEY")
+    h.add_foreignkeys(l, "L_PARTKEY", p, "P_PARTKEY")
+    h.add_foreignkeys(l, "L_SUPPKEY", s, "S_SUPPKEY")
+    h.add_foreignkeys(r, "R_REGIONKEY", n, "N_REGIONKEY")
+    h.add_foreignkeys(s, "S_NATIONKEY", n, "N_NATIONKEY")
+    h.add_foreignkeys(p, "P_PARTKEY", ps, "PS_PARTKEY")
+    h.add_foreignkeys(s, "S_SUPPKEY", ps, "PS_SUPPKEY")
+
+
+
+    allqueries = [pq1, pq2, pq3, pq4, pq5, pq6, pq7, pq8, pq9, pq10, pq11, pq12, pq13]
+    # allqueries = [pq4]
+    res = []
+    count = 1
+    c = pq3.get_new_pandas_queries()
+    for pq in allqueries:
+        print(f"*** query #{count} is generating ***")
+        count += 1
+        res += pq.get_new_pandas_queries()[:100]
+
+    print("done")
+
+    pandas_queries_list = pandas_queries(res)
+    pandas_queries_list.shuffle_queries()
+    pandas_queries_list.save_unmerged_examples(dir = Export_Rout, filename="unmerged_queries")
+    pandas_queries_list.generate_possible_merge_operations()
