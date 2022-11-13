@@ -6,7 +6,7 @@ from enum import Enum
 
 import itertools
 from operations import *
-
+from pandas_query import *
 
 
 def test_patients():
@@ -25,7 +25,7 @@ def test_patients():
 
     res = pq1.get_new_pandas_queries()[:1000] + pq2.get_new_pandas_queries()[:1000]
 
-    queries = pandas_queries(res)
+    queries = pandas_query.pandas_queries(res)
     queries.generate_possible_merge_operations(3)
 
 def generate_tpch():
@@ -121,18 +121,22 @@ def generate_tpch():
 
 if __name__ == "__main__":
 
-    customer = pd.read_csv("./../benchmarks/customer.csv")
-    lineitem = pd.read_csv("./../benchmarks/lineitem.csv")
-    nation = pd.read_csv("./../benchmarks/nation.csv")
-    orders = pd.read_csv("./../benchmarks/orders.csv")
-    part = pd.read_csv("./../benchmarks/part.csv")
-    partsupp = pd.read_csv("./../benchmarks/partsupp.csv")
-    region = pd.read_csv("./../benchmarks/region.csv")
-    supplier = pd.read_csv("./../benchmarks/supplier.csv")
+    customer = pd.read_csv("./../../benchmarks/customer.csv")
+    lineitem = pd.read_csv("./../../benchmarks/lineitem.csv")
+    nation = pd.read_csv("./../../benchmarks/nation.csv")
+    orders = pd.read_csv("./../../benchmarks/orders.csv")
+    part = pd.read_csv("./../../benchmarks/part.csv")
+    partsupp = pd.read_csv("./../../benchmarks/partsupp.csv")
+    region = pd.read_csv("./../../benchmarks/region.csv")
+    supplier = pd.read_csv("./../../benchmarks/supplier.csv")
+
+    col = customer.columns
     q1 = [selection("customer",
                     conditions=[condition("ACCTBAL", OP.gt, 100), OP_cond.OR, condition("CUSTKEY", OP.le, 70)]),
           projection("customer", ["CUSTKEY", "NATIONKEY", "PHONE", "ACCTBAL", "MKTSEGMENT"])
           ]
+
+
     q2 = [selection("customer",
                     conditions=[condition("ACCTBAL", OP.gt, 100), OP_cond.OR, condition("CUSTKEY", OP.le, 70)]),
           projection("customer", ["CUSTKEY", "NATIONKEY", "PHONE", "ACCTBAL", "MKTSEGMENT"]),

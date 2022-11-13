@@ -8,8 +8,9 @@ from enum import Enum
 
 import itertools
 from operations import *
+
 class pandas_query():
-    def __init__(self, q_gen_query: List[operation], source: pd.DataFrame = None, verbose = False):
+    def __init__(self, q_gen_query: List[operation], source: pd.DataFrame = None, verbose = True):
 
         self.setup_query(q_gen_query)
         if verbose:

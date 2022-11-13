@@ -3,7 +3,7 @@ import random
 import pandas as pd
 from typing import Type, List, Union, Dict
 from enum import Enum
-from pandas_query import *
+# from pandas_query import *
 import itertools
 
 
