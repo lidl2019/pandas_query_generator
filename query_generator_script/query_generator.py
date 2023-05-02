@@ -11,6 +11,7 @@ from tqdm import tqdm
 
 
 class pandas_source:
+
     def __init__(self, df: pd.DataFrame):
 
         self.source_df = df
@@ -41,7 +42,15 @@ class pandas_source:
 
 
 class operation:
+    '''
+    The abstract class operation
+    '''
     def __init__(self, df_name, leading):
+        '''
+
+        :param df_name:
+        :param leading: determine whether it is the first operation to be performed
+        '''
         self.df_name = df_name
         self.leading = leading
 
@@ -72,8 +81,16 @@ class OP_cond(Enum):
 
 
 class condition():
-
+    '''
+    Refers to conditions like 'col1 > 20' in a particular dataframe
+    '''
     def __init__(self, col_name, op: OP, num):
+        '''
+
+        :param col_name: str
+        :param op: OP
+        :param num: not only numbers, can also be strings
+        '''
         self.col = col_name
         self.op = op
         self.val = num
@@ -86,7 +103,6 @@ class condition():
         return condition(self.col, op, self.val)
         # self.op = op
 
-    # def to_str(self):
 
     def __str__(self):
         return f"condition ({self.col} {self.op.value} {self.val} )"
@@ -109,6 +125,10 @@ class selection(operation):
         return selection(self.df_name, new_cond, self.leading)
 
     def to_str(self):
+        '''
+
+        :return: a str that is executable in pandas grammar
+        '''
 
         res_str = f"{self.df_name}" if self.leading else ""
         cur_condition = ""
@@ -141,9 +161,23 @@ class selection(operation):
 
 
 class merge(operation):
+    '''
+    df1.merge(df2, left_on = , right_on = )
+    '''
     def __init__(self, df_name, queries: 'pandas_query', on=None, left_on: str = None, right_on: str = None,
                  leading=False):
+        '''
+
+        :param df_name: name of the dataframes
+        :param queries: the following queries after the merge
+        :param on: if the columnnames are the same, you can use 'on'
+        :param left_on: otherwise, use left_on and right_on for different column names
+        :param right_on:
+        :param leading: if it is the leading operation, then true
+        '''
         super().__init__(df_name, leading)
+
+
 
         # assert (left_on == None and right_on == None) or on == None
         if on is None:
@@ -159,6 +193,10 @@ class merge(operation):
         self.right_on = right_on
 
     def to_str(self) -> str:
+        '''
+
+        :return: a string that is executable in pandas grammar
+        '''
         # print(f"+++++++++++++++++++++{self.on_col}")
 
         if len(self.on_col) > 0:
@@ -195,14 +233,24 @@ class merge(operation):
 
 
 class projection(operation):
-    def __init__(self, df_name, columns, leading=True):
+    def __init__(self, df_name, columns: List[str], leading=True):
+        '''
+
+        :param df_name:
+        :param columns: the desired columns that wants to be projected
+        :param leading: whether it is the leading operation
+        '''
         super().__init__(df_name, leading)
         self.desire_columns = columns
         self.length = len(columns)
-        # self.leading = leading
-        # self.df_name = df_name
+
 
     def to_str(self):
+        '''
+
+        :return: a string that is executable in pandas grammar
+        '''
+
         res_str = f"{self.df_name}" if self.leading else ""
 
         cur_str = ""
@@ -227,7 +275,15 @@ class projection(operation):
 
 class group_by(operation):
     def __init__(self, df_name, columns, other_args=None, leading=False):
+        '''
+
+        :param df_name:
+        :param columns: columns to be performed the operation
+        :param other_args: additional arguments in pd.groupby
+        :param leading:
+        '''
         super().__init__(df_name, leading)
+
 
         self.columns = columns if isinstance(columns, List) else [columns]
         self.other_args = other_args
@@ -236,6 +292,9 @@ class group_by(operation):
         self.columns = columns
 
     def to_str(self):
+        '''
+        :return: a string that is executable in pandas grammar
+        '''
         other_args = self.other_args if self.other_args else ""
         res_str = f"{self.df_name}" if self.leading else ""
         res_str = res_str + "." + "groupby" + "(" + "by=" + str(self.columns) + other_args + ")"
@@ -263,6 +322,9 @@ class agg(operation):
         self.dict_key_vals = dict_columns
 
     def to_str(self):
+        '''
+        :return: a string that is executable in pandas grammar
+        '''
         res_str = f"{self.df_name}" if self.leading else ""
 
         res_str = res_str + "." + "agg" + "(" + "'" + str(self.dict_key_vals) + "'"
@@ -281,6 +343,9 @@ class agg(operation):
 
 
 class pandas_query():
+    '''
+    a pandas query in the intermediate representation
+    '''
     def __init__(self, q_gen_query: List[operation], source: 'TBL_source', verbose=False):
 
         if verbose:
@@ -337,6 +402,7 @@ class pandas_query():
             return projection(self.df_name, res[0])
 
     def target_possible_selections(self, length=50):
+
         possible_selection_columns = {}
         source_df = self.get_target()
         for i, col in enumerate(source_df.columns):
@@ -367,6 +433,11 @@ class pandas_query():
         return possible_condition_columns
 
     def possible_selections(self, length=50):
+        '''
+
+        :param length: a threshold that prevents extra time consumption
+        :return: return the possible conditions for each numerical columns
+        '''
         possible_selection_columns = {}
 
         source_df = self.get_source()
@@ -412,6 +483,11 @@ class pandas_query():
         return self._source_.source.copy()
 
     def setup_query(self, list_op: List[operation]):
+        '''
+
+        :param list_op: check if the columns will be changed after the operations
+        :return:
+        '''
         list_operation = list_op[:]
         source_cols = list(self.get_source().columns)
         changed = False
@@ -433,7 +509,12 @@ class pandas_query():
                 operation_.set_leading(False)
         return list_operation
 
-    def gen_queries(self) -> List[List[operation]]:
+    def gen_queries(self, maxrange = 50) -> List[List[operation]]:
+        '''
+
+        :param maxrange: threshold for selection
+        :return: List of operation lists, an operation list can be directly transferred into a pandas query
+        '''
         generated_queries = []
         for operation in self.pre_gen_query:
 
@@ -444,10 +525,8 @@ class pandas_query():
 
                 possible_selection_operations = []
                 print("===== generating selection combinations =====")
-                for i in range(50):
-                    # if len(list(possible_conditions_dict.keys())) == 1:
-                    #     selection_length =
-                    # else:
+                for i in range(maxrange):
+
                     selection_length = random.randrange(1, len(possible_conditions_dict.keys()) + 2, 1)
                     cur_conditions = []
                     for j in range(selection_length):
@@ -492,11 +571,16 @@ class pandas_query():
         return l
 
     def get_new_pandas_queries(self, out=1000):
+        '''
+
+        :param out: maximum inflated queries out
+        :return: list of operation lists
+        '''
         res = []
         new_queries = self.gen_queries()
 
         random.shuffle(new_queries)
-        new_queries = new_queries[:1000]
+        new_queries = new_queries[:out]
 
         print(f" ==== testing source with {len(new_queries)} queries ==== ")
         df = self.get_source()
@@ -528,6 +612,11 @@ class pandas_query():
         return res
 
     def check_res(self, res: List['pandas_query']):
+        '''
+        check if the queries are in good grammar
+        :param res:
+        :return:
+        '''
         true_count = 0
         false_count = 0
         for r in res:
@@ -624,12 +713,7 @@ class pandas_query():
         des = self.get_source_description(self.get_source(), col)
         return des
 
-    # def get_query_str(self, query):
-    #     strs = ""
-    #     for q in query:
-    #         strs += q.to_str()
-    #
-    #     return strs
+
 
     def get_query_string(self):
         strs = ""
@@ -651,6 +735,12 @@ class pandas_query():
 
 class pandas_query_pool():
     def __init__(self, queries: List[pandas_query], self_join=False, verbose=False):
+        '''
+
+        :param queries: list of queries in type pandas_query
+        :param self_join: bool,
+        :param verbose: print the processing steps
+        '''
         self.queries = queries
         self.self_join = self_join
         self.result_queries = []
@@ -892,14 +982,26 @@ class pandas_query_pool():
 
 
 class TBL_source():
-    # self.source_df
+    '''
+    The primary source that reads from the csv / accessible file, a wrapper of the pd.DataFrame class
+    '''
 
     def __init__(self, df: pd.DataFrame, name):
+        '''
+
+        :param df: pd.dataframe
+        :param name: referring to the name of the dataframe
+        :param foreign_keys: a hashmap that records all the foreign key pairs
+        '''
         self.source = df
         self.foreign_keys = {}
         self.name = name
 
     def get_numerical_columns(self):
+        '''
+
+        :return: the column names that are type int / float
+        '''
         num_columns = []
         for i, col in enumerate(self.source.columns):
             if "int" in str(type(self.source[col][0])):
@@ -909,6 +1011,11 @@ class TBL_source():
         return num_columns
 
     def get_a_selection(self):
+
+        '''
+        perform a random selection on the dataframe
+        :return: an object of type selection
+        '''
 
         possible_selection_columns = self.get_numerical_columns()
         stats = ["min", "max", "count", "mean", "std", "25%", "50%", "75%"]
@@ -926,12 +1033,23 @@ class TBL_source():
         return selection(self.name, [cur_condition])
 
     def get_a_projection(self):
+
+        '''
+        perform a random projection on the dataframe
+        :return: an object of type projection
+        '''
         columns = self.source.columns
         num = random.randint(max(len(columns) - 2, 3), len(columns))
         res_col = random.sample(list(columns), num)
         return projection(self.name, res_col)
 
     def get_a_aggregation(self):
+
+        '''
+        perform a random agg on the dataframe
+        :return: an object of type aggregation
+        :return:
+        '''
         stats = ["min", "max", "count", "mean"]
         return agg(self.name, random.choice(stats))
 
@@ -941,16 +1059,30 @@ class TBL_source():
         return group_by(self.name, res_col)
 
     def add_edge(self, col_name, other_col_name, other: 'TBL_source'):
+        '''
+
+        :param col_name: key on the current dataframe
+        :param other_col_name: key on the foreign dataframe
+        :param other: the other dataframe
+        :return:
+        '''
         self.foreign_keys[col_name] = []
         self.foreign_keys[col_name].append([other_col_name, other])
 
     def get_foreign_keys(self):
+        '''
+        :return: get all foreign keys
+        '''
         return self.foreign_keys.copy()
 
     def equals(self, o: 'TBL_source'):
         return self.source.equals(o.source)
 
     def gen_base_queries(self) -> List[pandas_query]:
+        '''
+        Customized generation with base queries, can be modified to fit in various circumstances
+        :return:
+        '''
 
         # queries = []
         q1 = pandas_query(q_gen_query=[self.get_a_selection()], source=self)
@@ -965,6 +1097,10 @@ class TBL_source():
 
 
 def test_patients():
+    '''
+    Please use Main to run this script, this is just an example of workflow
+    :return:
+    '''
     df = pd.read_csv("./patient_ma_bn.csv")
     q1 = [selection("df", conditions=[condition("Age", OP.gt, 50), OP_cond.OR, condition("Age", OP.le, 70)]),
           projection("df", ["Age", "Sex", "operation", "P1200", "P1600", "Smoking"]), group_by("df", "Sex"),
@@ -1098,14 +1234,14 @@ def run_TPCH():
 
 if __name__ == "__main__":
     # run_TPCH()
-    customer = pd.read_csv("./../../../benchmarks/customer_1.csv")
-    lineitem = pd.read_csv("./../../../benchmarks/lineitem_1.csv")
-    nation = pd.read_csv("./../../../benchmarks/nation_1.csv")
-    orders = pd.read_csv("./../../../benchmarks/orders_1.csv")
-    part = pd.read_csv("./../../../benchmarks/part_1.csv")
-    partsupp = pd.read_csv("./../../../benchmarks/partsupp_1.csv")
-    region = pd.read_csv("./../../../benchmarks/region_1.csv")
-    supplier = pd.read_csv("./../../../benchmarks/supplier_1.csv")
+    customer = pd.read_csv("./../../../benchmarks/customer_2.csv")
+    lineitem = pd.read_csv("./../../../benchmarks/lineitem_2.csv")
+    nation = pd.read_csv("./../../../benchmarks/nation_2.csv")
+    orders = pd.read_csv("./../../../benchmarks/orders_2.csv")
+    part = pd.read_csv("./../../../benchmarks/part_2.csv")
+    partsupp = pd.read_csv("./../../../benchmarks/partsupp_2.csv")
+    region = pd.read_csv("./../../../benchmarks/region_2.csv")
+    supplier = pd.read_csv("./../../../benchmarks/supplier_2.csv")
 
     c = TBL_source(customer, "customer")
     l = TBL_source(lineitem, "lineitem")
@@ -1132,6 +1268,8 @@ if __name__ == "__main__":
     all_source = [c, l, n, o, p, ps, r, s]
 
     '''
+    user input example:
+    
     q1 = [selection("customer",
                     conditions=[condition("c_acctbal", OP.gt, 100), OP_cond.OR, condition("c_custkey", OP.le, 70)]),
           projection("customer", ["c_custkey", "c_nationkey", "c_phone", "c_acctbal", "c_mktsegment"])
@@ -1234,6 +1372,6 @@ if __name__ == "__main__":
 
     pandas_queries_list = pandas_query_pool(res)
     pandas_queries_list.shuffle_queries()
-    pandas_queries_list.save_unmerged_examples(dir=Export_Rout, filename="unmerged_queries_auto")
+    pandas_queries_list.save_unmerged_examples(dir=Export_Rout, filename="unmerged_queries_auto_sf0001")
     pandas_queries_list.generate_possible_merge_operations()
-    pandas_queries_list.save_merged_examples(dir=Export_Rout, filename="merged_queries_auto")
+    pandas_queries_list.save_merged_examples(dir=Export_Rout, filename="merged_queries_auto_sf0001")
